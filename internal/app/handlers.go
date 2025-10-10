@@ -908,11 +908,21 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 	hash := c.GetHeader(common.GCPHashHeader)
 	log.Debugf("TODO: check/save etc. write file '%s', hash '%s'", fileName, hash)
 
-	_, err := app.blobStorer.StoreBlob(uid, blobID, c.Request.Body, 0)
+	generation, err := app.blobStorer.StoreBlob(uid, blobID, c.Request.Body, 0)
 	if err != nil {
 		log.Error(err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
+	}
+
+	if fileName != "" && strings.HasSuffix(fileName, storage.RmFileExt) {
+		log.Debugf("Tracking .rm file modification: %s (gen=%d)", fileName, generation)
+		pageID := strings.TrimSuffix(blobID, storage.RmFileExt)
+		docID := ""
+
+		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, generation); err != nil {
+			log.Warnf("Failed to track page modification: %v", err)
+		}
 	}
 
 	c.Status(http.StatusOK)

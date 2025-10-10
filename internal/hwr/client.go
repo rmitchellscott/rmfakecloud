@@ -87,7 +87,7 @@ func (hwr *HWRClient) SendRequest(data []byte) (body []byte, err error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		err = fmt.Errorf("not ok, Status: %d", res.StatusCode)
+		err = fmt.Errorf("not ok, Status: %d, Body: %s", res.StatusCode, string(body))
 		return
 	}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/ddvk/rmfakecloud/internal/app/hub"
 	"github.com/ddvk/rmfakecloud/internal/config"
 	"github.com/ddvk/rmfakecloud/internal/hwr"
+	"github.com/ddvk/rmfakecloud/internal/search"
 	"github.com/ddvk/rmfakecloud/internal/storage"
 
 	"github.com/ddvk/rmfakecloud/internal/storage/fs"
@@ -37,6 +38,7 @@ type App struct {
 	hub           *hub.Hub
 	codeConnector CodeConnector
 	hwrClient     *hwr.HWRClient
+	searchHandler *search.Handler
 }
 
 // Start starts the app
@@ -132,6 +134,18 @@ func NewApp(cfg *config.Config) App {
 		router.Use(requestLoggerMiddleware())
 	}
 
+	hwrClient := &hwr.HWRClient{
+		Cfg: cfg,
+	}
+
+	deltaTracker, err := search.NewDeltaTracker(cfg.DataDir)
+	if err != nil {
+		log.Warnf("Failed to initialize delta tracker: %v", err)
+	}
+
+	indexManager := search.NewIndexManager(cfg.DataDir, hwrClient)
+	searchHandler := search.NewHandler(deltaTracker, indexManager, cfg.DataDir)
+
 	app := App{
 		router:        router,
 		cfg:           cfg,
@@ -141,9 +155,8 @@ func NewApp(cfg *config.Config) App {
 		blobStorer:    fsStorage,
 		hub:           ntfHub,
 		codeConnector: codeConnector,
-		hwrClient: &hwr.HWRClient{
-			Cfg: cfg,
-		},
+		hwrClient:     hwrClient,
+		searchHandler: searchHandler,
 	}
 	app.registerRoutes(router)
 
