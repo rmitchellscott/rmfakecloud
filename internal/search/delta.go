@@ -143,7 +143,7 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 	if len(pages) <= PageSize {
 		// Return all pages
 		responseGeneration := pages[len(pages)-1].Generation
-		log.Infof("Delta sync (since=%d): returning %d pages, latest=true, generation=%d",
+		log.Debugf("Delta sync (since=%d): returning %d pages, latest=true, generation=%d",
 			since, len(pages), responseGeneration)
 
 		return &DeltaResponse{
@@ -156,7 +156,7 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 
 	// Return first batch
 	responseGeneration := pages[PageSize-1].Generation
-	log.Infof("Delta sync (since=%d): returning %d/%d pages, latest=false, generation=%d",
+	log.Debugf("Delta sync (since=%d): returning %d/%d pages, latest=false, generation=%d",
 		since, PageSize, len(pages), responseGeneration)
 
 	return &DeltaResponse{

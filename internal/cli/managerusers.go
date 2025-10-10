@@ -34,6 +34,7 @@ func (cli *Cli) SetUser(args []string) {
 	pass := userParam.String("p", "", "password")
 	admin := userParam.Bool("a", false, "isadmmin")
 	sync15 := userParam.Bool("s", false, "should the user use the new sync")
+	search := userParam.Bool("search", false, "enable handwriting search for this user")
 
 	userParam.Parse(args)
 	if *username == "" {
@@ -61,6 +62,7 @@ func (cli *Cli) SetUser(args []string) {
 	}
 	usr.IsAdmin = *admin
 	usr.Sync15 = *sync15
+	usr.Search = *search
 
 	err = cli.storage.UpdateUser(usr)
 	if err != nil {

@@ -115,10 +115,11 @@ func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath st
 
 	if cached, err := im.loadCachedIndex(cachePath); err == nil {
 		if cached.Generation == generation {
-			log.Debugf("Using cached search index for %s/%s (gen=%d)", docID, pageID, generation)
+			// Set version and generation from cache into response
+			cached.Response.Version = 1
+			cached.Response.Generation = cached.Generation
 			return &cached.Response, nil
 		}
-		log.Debugf("Cache outdated for %s/%s (cache=%d, current=%d)", docID, pageID, cached.Generation, generation)
 	}
 
 	log.Infof("Building search index for %s/%s", docID, pageID)
@@ -126,6 +127,10 @@ func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath st
 	if err != nil {
 		return nil, err
 	}
+
+	// Set version and generation in response before saving
+	index.Version = 1
+	index.Generation = generation
 
 	if err := im.saveCachedIndex(cachePath, generation, index); err != nil {
 		log.Warnf("Failed to cache search index: %v", err)
@@ -197,15 +202,6 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 		}, nil
 	}
 
-	// Debug: log first stroke we're sending to MyScript
-	if len(msRequest.StrokeGroups) > 0 && len(msRequest.StrokeGroups[0].Strokes) > 0 {
-		firstStroke := msRequest.StrokeGroups[0].Strokes[0]
-		if len(firstStroke.X) > 0 && len(firstStroke.Y) > 0 {
-			log.Debugf("First stroke sent to MyScript (×10): X[0]=%.2f Y[0]=%.2f (count=%d points)",
-				firstStroke.X[0], firstStroke.Y[0], len(firstStroke.X))
-		}
-	}
-
 	jiixBytes, err := im.hwrClient.SendRequest(msRequestJSON)
 	if err != nil {
 		return nil, fmt.Errorf("MyScript API call failed: %w", err)
@@ -216,16 +212,7 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 		return nil, fmt.Errorf("failed to parse MyScript response: %w", err)
 	}
 
-	// Debug: log first word MyScript returned (BEFORE scaling)
-	if len(jiixResponse.Elements) > 0 && len(jiixResponse.Elements[0].Words) > 0 {
-		firstWord := jiixResponse.Elements[0].Words[0]
-		log.Debugf("First word from MyScript (BEFORE x89 scaling): '%s' X=%.2f Y=%.2f W=%.2f H=%.2f",
-			firstWord.Label, firstWord.BoundingBox.X, firstWord.BoundingBox.Y,
-			firstWord.BoundingBox.Width, firstWord.BoundingBox.Height)
-	}
-
 	strokes := rmlines.GetStrokes(parsed)
-	log.Debugf("GetStrokes returned %d strokes", len(strokes))
 
 	var contentParts []string
 	var strokesArray [][]string
@@ -268,14 +255,7 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRequest, []StrokeMapping, error) {
 	layerStrokes := make(map[string][]rmlines.Stroke)
 
-	log.Debugf("Parsing nodes: found %d nodes", len(parsed.Nodes))
-
 	for _, node := range parsed.Nodes {
-		log.Debugf("Node has %d children", len(node.Children))
-		for i, child := range node.Children {
-			log.Debugf("  Child[%d]: Type=%s, ItemID=%s, ValueLen=%d", i, child.Type, child.ItemID, len(child.Value))
-		}
-
 		for _, child := range node.Children {
 			if child.Type != "Line" || len(child.Value) == 0 {
 				continue
@@ -308,7 +288,6 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 	for _, strokes := range layerStrokes {
 		totalStrokes += len(strokes)
 	}
-	log.Debugf("Built layerStrokes: %d layers with %d total strokes", len(layerStrokes), totalStrokes)
 
 	// If no strokes found, return empty request (don't send to MyScript)
 	// This handles typed text pages or empty pages
@@ -410,12 +389,6 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 			},
 		},
 	}
-
-	totalRequestStrokes := 0
-	for _, sg := range strokeGroups {
-		totalRequestStrokes += len(sg.Strokes)
-	}
-	log.Debugf("MyScript request: %d strokeGroups with %d total strokes", len(strokeGroups), totalRequestStrokes)
 
 	return request, mappings, nil
 }

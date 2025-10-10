@@ -148,7 +148,11 @@ func (app *App) newUserToken(c *gin.Context) {
 	scopes := []string{"intgr", "screenshare", "docedit"}
 
 	if app.cfg.HWRApplicationKey != "" && app.cfg.HWRHmac != "" {
-		scopes = append(scopes, "hwcmail:-1", "hwc", "hws")
+		scopes = append(scopes, "hwcmail:-1", "hwc")
+	}
+
+	if user.Search {
+		scopes = append(scopes, "hws")
 	}
 
 	if app.cfg.SMTPConfig != nil {
@@ -908,7 +912,7 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 	hash := c.GetHeader(common.GCPHashHeader)
 	log.Debugf("TODO: check/save etc. write file '%s', hash '%s'", fileName, hash)
 
-	generation, err := app.blobStorer.StoreBlob(uid, blobID, c.Request.Body, 0)
+	_, err := app.blobStorer.StoreBlob(uid, blobID, c.Request.Body, 0)
 	if err != nil {
 		log.Error(err)
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -916,8 +920,6 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 	}
 
 	if fileName != "" && strings.HasSuffix(fileName, storage.RmFileExt) {
-		log.Debugf("Tracking .rm file modification: %s (gen=%d)", fileName, generation)
-
 		// Use timestamp-based generation for search (matches device behavior)
 		searchGeneration := time.Now().UnixNano() / 1000 // microseconds
 

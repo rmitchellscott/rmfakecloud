@@ -1,9 +1,8 @@
 package search
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ddvk/rmfakecloud/internal/hwr"
+	"github.com/ddvk/rmfakecloud/internal/storage"
 	"github.com/ddvk/rmfakecloud/internal/storage/models"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -21,6 +22,8 @@ type Handler struct {
 	indexManager *IndexManager
 	dataDir      string
 	indexQueue   chan indexJob
+	jobQueue     *JobQueue
+	userStorer   storage.UserStorer
 }
 
 type indexJob struct {
@@ -30,18 +33,26 @@ type indexJob struct {
 	generation int64
 }
 
-func NewHandler(deltaTracker *DeltaTracker, indexManager *IndexManager, dataDir string) *Handler {
+func NewHandler(deltaTracker *DeltaTracker, indexManager *IndexManager, dataDir string, userStorer storage.UserStorer) *Handler {
 	h := &Handler{
 		deltaTracker: deltaTracker,
 		indexManager: indexManager,
 		dataDir:      dataDir,
 		indexQueue:   make(chan indexJob, 100),
+		jobQueue:     NewJobQueue(dataDir),
+		userStorer:   userStorer,
 	}
 
 	// Start 5 worker goroutines
 	for i := 0; i < 5; i++ {
 		go h.indexWorker()
 	}
+
+	// Start recovery goroutine to process pending jobs
+	go h.jobRecoveryWorker()
+
+	// Load pending jobs from disk on startup
+	go h.loadPendingJobsOnStartup()
 
 	return h
 }
@@ -51,27 +62,48 @@ func (h *Handler) indexWorker() {
 		rmFilePath, err := h.getRmFilePath(job.uid, job.docID, job.pageID)
 		if err != nil {
 			log.Warnf("Failed to get rm file path for %s/%s: %v", job.docID, job.pageID, err)
+			h.jobQueue.UpdateJobError(job.uid, job.docID, job.pageID, "other")
 			continue
 		}
 
 		index, err := h.indexManager.GetOrBuildIndex(job.uid, job.docID, job.pageID, rmFilePath, job.generation)
 		if err != nil {
-			log.Warnf("Failed to build index for %s/%s: %v", job.docID, job.pageID, err)
+			// Check if this is a quota exceeded error
+			if errors.Is(err, hwr.ErrQuotaExceeded) {
+				log.Warnf("MyScript quota exceeded for %s/%s, will retry daily", job.docID, job.pageID)
+				h.jobQueue.UpdateJobError(job.uid, job.docID, job.pageID, "quota")
+			} else {
+				log.Warnf("Failed to build index for %s/%s: %v", job.docID, job.pageID, err)
+				h.jobQueue.UpdateJobError(job.uid, job.docID, job.pageID, "other")
+			}
 			continue
 		}
 
 		if len(index.Handwritten.MainStrokes.Strokes) > 0 {
 			log.Infof("Indexed handwriting page %s/%s (%d words)", job.docID, job.pageID, len(index.Handwritten.MainStrokes.Strokes))
-		} else {
-			log.Debugf("Indexed typed text page %s/%s (no handwriting)", job.docID, job.pageID)
+		}
+
+		// Delete pending job after successful indexing
+		if err := h.jobQueue.DeleteJob(job.uid, job.docID, job.pageID); err != nil {
+			log.Warnf("Failed to delete pending job for %s/%s: %v", job.docID, job.pageID, err)
 		}
 	}
 }
 
 func (h *Handler) GetSettings(c *gin.Context) {
+	uid := c.GetString("UserID")
+	searchEnabled := false
+
+	if uid != "" {
+		user, err := h.userStorer.GetUser(uid)
+		if err == nil && user != nil {
+			searchEnabled = user.Search
+		}
+	}
+
 	response := SettingsResponse{
 		Language:      "en_US",
-		SearchEnabled: true,
+		SearchEnabled: searchEnabled,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -96,7 +128,7 @@ func (h *Handler) GetDelta(c *gin.Context) {
 		}
 	}
 
-	log.Infof("Delta request from user %s, since=%d", uid, since)
+	log.Debugf("Delta request from user %s, since=%d", uid, since)
 
 	delta, err := h.deltaTracker.GetDelta(uid, since)
 	if err != nil {
@@ -106,12 +138,12 @@ func (h *Handler) GetDelta(c *gin.Context) {
 	}
 
 	if len(delta.Changed) == 0 {
-		log.Infof("Delta response: 304 Not Modified (no changes since %d)", since)
+		log.Debugf("Delta response: 304 Not Modified (no changes since %d)", since)
 		c.Status(http.StatusNotModified)
 		return
 	}
 
-	log.Infof("Delta response: 200 OK - %+v", delta)
+	log.Debugf("Delta response: 200 OK - %+v", delta)
 
 	// Set ETag header with the generation we're returning
 	c.Header("ETag", fmt.Sprintf("%d", delta.Generation))
@@ -140,18 +172,21 @@ func (h *Handler) GetSearchIndex(c *gin.Context) {
 		return
 	}
 
-	log.Infof("Reading .rm file from: %s", rmFilePath)
-	if fileInfo, err := os.Stat(rmFilePath); err == nil {
-		log.Debugf("File size: %d bytes", fileInfo.Size())
-	} else {
+	log.Debugf("Reading .rm file from: %s", rmFilePath)
+	if _, err := os.Stat(rmFilePath); err != nil {
 		log.Warnf("Failed to stat file: %v", err)
 	}
 
-	// Use timestamp-based generation (microseconds since epoch)
-	// This matches the device's generation format and enables delta sync
-	generation := time.Now().UnixNano() / 1000
+	// Get file modification time as generation (cache uses this to detect changes)
+	fileInfo, err := os.Stat(rmFilePath)
+	if err != nil {
+		log.Errorf("Failed to stat .rm file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stat file"})
+		return
+	}
+	generation := fileInfo.ModTime().UnixNano() / 1000
 
-	log.Infof("Search request for %s/%s (generation=%d)", docID, pageID, generation)
+	log.Debugf("Search request for %s/%s (file mtime generation=%d)", docID, pageID, generation)
 
 	index, err := h.indexManager.GetOrBuildIndex(uid, docID, pageID, rmFilePath, generation)
 	if err != nil {
@@ -159,10 +194,6 @@ func (h *Handler) GetSearchIndex(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build search index"})
 		return
 	}
-
-	// Set version and generation in response
-	index.Version = 1
-	index.Generation = generation
 
 	c.JSON(http.StatusOK, index)
 }
@@ -226,68 +257,143 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 }
 
 func (h *Handler) TrackPageModification(uid, docID, pageID string, generation int64) error {
-	// Submit job to worker pool (non-blocking)
+	// Save job to disk first (persistent storage)
+	if err := h.jobQueue.SaveJob(uid, docID, pageID, generation); err != nil {
+		log.Errorf("Failed to save pending job for %s/%s: %v", docID, pageID, err)
+		return err
+	}
+
+	// Try to submit job to worker pool (non-blocking)
 	select {
 	case h.indexQueue <- indexJob{uid, docID, pageID, generation}:
-		log.Debugf("Queued indexing job for %s/%s", docID, pageID)
+		// Job queued successfully
 	default:
-		log.Warnf("Index queue full, dropping job for %s/%s", docID, pageID)
+		log.Warnf("Index queue full, job saved to disk for later processing: %s/%s", docID, pageID)
 	}
 
 	return nil
 }
 
-func (h *Handler) HandleError(c *gin.Context) {
-	// Device reports search errors here - just accept them
-	log.Debug("Received search error report from device")
-	c.Status(http.StatusAccepted)
+func (h *Handler) jobRecoveryWorker() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		allJobs, err := h.jobQueue.GetAllPendingJobs()
+		if err != nil {
+			log.Errorf("Failed to get pending jobs: %v", err)
+			continue
+		}
+
+		totalJobs := 0
+		for _, jobs := range allJobs {
+			totalJobs += len(jobs)
+		}
+
+		if totalJobs == 0 {
+			continue
+		}
+
+		for _, jobs := range allJobs {
+			for _, job := range jobs {
+				// Calculate backoff based on error type and retry count
+				var backoffDuration time.Duration
+				var shouldRetry bool
+
+				if job.ErrorType == "quota" {
+					// Quota errors: retry once per day indefinitely
+					backoffDuration = 24 * time.Hour
+					shouldRetry = true
+				} else {
+					// Other errors: exponential backoff capped at 1 hour, max 10 retries
+					if job.RetryCount >= 10 {
+						log.Warnf("Job %s/%s has failed %d times (non-quota error), giving up", job.DocID, job.PageID, job.RetryCount)
+						shouldRetry = false
+					} else {
+						// Exponential backoff: 30s * 2^retryCount, capped at 1 hour
+						backoffSeconds := 30 * (1 << uint(job.RetryCount)) // 30, 60, 120, 240, 480, 960, 1920, 3600+
+						if backoffSeconds > 3600 {
+							backoffSeconds = 3600 // Cap at 1 hour
+						}
+						backoffDuration = time.Duration(backoffSeconds) * time.Second
+						shouldRetry = true
+					}
+				}
+
+				if !shouldRetry {
+					continue
+				}
+
+				// Check if enough time has passed since last attempt
+				timeSinceLastAttempt := time.Since(job.LastAttempt)
+				if timeSinceLastAttempt < backoffDuration {
+					continue
+				}
+
+				// Try to enqueue (non-blocking)
+				select {
+				case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
+					// Job queued for retry
+				default:
+					// Queue full, will retry later
+					return
+				}
+			}
+		}
+	}
 }
 
-func (h *Handler) logRequestToFile(method, url string, headers http.Header, body []byte) {
-	logPath := filepath.Join(h.dataDir, "search_requests.log")
+func (h *Handler) loadPendingJobsOnStartup() {
+	// Wait a bit for the system to stabilize
+	time.Sleep(5 * time.Second)
 
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	allJobs, err := h.jobQueue.GetAllPendingJobs()
 	if err != nil {
-		log.Warnf("Failed to open search request log: %v", err)
+		log.Errorf("Startup: failed to load pending jobs: %v", err)
 		return
 	}
-	defer f.Close()
 
-	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	totalJobs := 0
+	for _, jobs := range allJobs {
+		totalJobs += len(jobs)
+	}
 
-	f.WriteString(fmt.Sprintf("\n=== %s %s %s ===\n", timestamp, method, url))
-	f.WriteString("Headers:\n")
-	for key, values := range headers {
-		for _, value := range values {
-			f.WriteString(fmt.Sprintf("  %s: %s\n", key, value))
+	if totalJobs == 0 {
+		log.Info("Startup: no pending jobs to recover")
+		return
+	}
+
+	log.Infof("Startup: loading %d pending jobs from disk", totalJobs)
+
+	for _, jobs := range allJobs {
+		for _, job := range jobs {
+			// Skip non-quota errors that have exceeded retry limit
+			if job.ErrorType != "quota" && job.RetryCount >= 10 {
+				log.Warnf("Startup: job %s/%s has failed %d times (non-quota), giving up", job.DocID, job.PageID, job.RetryCount)
+				continue
+			}
+
+			// Try to enqueue (non-blocking)
+			select {
+			case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
+				// Job queued
+			default:
+				// Queue full, recovery worker will handle remaining jobs
+				return
+			}
 		}
 	}
 
-	if len(body) > 0 {
-		f.WriteString(fmt.Sprintf("Body: %s\n", string(body)))
-	} else {
-		f.WriteString("Body: (empty)\n")
-	}
-	f.WriteString("\n")
+	log.Infof("Startup: finished loading pending jobs")
 }
 
-func (h *Handler) requestLoggingMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var bodyBytes []byte
-		if c.Request.Body != nil {
-			bodyBytes, _ = io.ReadAll(c.Request.Body)
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		}
-
-		h.logRequestToFile(c.Request.Method, c.Request.URL.String(), c.Request.Header, bodyBytes)
-
-		c.Next()
-	}
+func (h *Handler) HandleError(c *gin.Context) {
+	// Device reports search errors here - just accept them
+	c.Status(http.StatusAccepted)
 }
 
 func RegisterRoutes(router *gin.RouterGroup, handler *Handler) {
 	searchV1 := router.Group("/search/v1")
-	searchV1.Use(handler.requestLoggingMiddleware())
 	{
 		searchV1.GET("/settings", handler.GetSettings)
 		searchV1.GET("/delta", handler.GetDelta)

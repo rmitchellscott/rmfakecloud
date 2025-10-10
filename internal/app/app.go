@@ -111,6 +111,11 @@ func NewApp(cfg *config.Config) App {
 		log.Warn("No users found, the first login will create a user")
 		//TODO: not thread safe
 		cfg.CreateFirstUser = true
+	} else {
+		// Run migration to ensure all user profiles have the search field
+		if err := fsStorage.MigrateUserProfiles(); err != nil {
+			log.Warnf("Failed to migrate user profiles: %v", err)
+		}
 	}
 	ntfHub := hub.NewHub()
 	codeConnector := NewCodeConnector()
@@ -144,7 +149,7 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	indexManager := search.NewIndexManager(cfg.DataDir, hwrClient)
-	searchHandler := search.NewHandler(deltaTracker, indexManager, cfg.DataDir)
+	searchHandler := search.NewHandler(deltaTracker, indexManager, cfg.DataDir, fsStorage)
 
 	app := App{
 		router:        router,
