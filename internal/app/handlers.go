@@ -917,10 +917,24 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 
 	if fileName != "" && strings.HasSuffix(fileName, storage.RmFileExt) {
 		log.Debugf("Tracking .rm file modification: %s (gen=%d)", fileName, generation)
-		pageID := strings.TrimSuffix(blobID, storage.RmFileExt)
-		docID := ""
 
-		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, generation); err != nil {
+		// Use timestamp-based generation for search (matches device behavior)
+		searchGeneration := time.Now().UnixNano() / 1000 // microseconds
+
+		// Parse fileName to extract docID and pageID
+		// fileName format: "docID/pageID.rm"
+		var docID, pageID string
+		parts := strings.Split(fileName, "/")
+		if len(parts) == 2 {
+			docID = parts[0]
+			pageID = strings.TrimSuffix(parts[1], storage.RmFileExt)
+		} else {
+			// Fallback for unexpected format
+			docID = ""
+			pageID = strings.TrimSuffix(fileName, storage.RmFileExt)
+		}
+
+		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, searchGeneration); err != nil {
 			log.Warnf("Failed to track page modification: %v", err)
 		}
 	}

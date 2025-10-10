@@ -107,7 +107,7 @@ func NewIndexManager(dataDir string, hwrClient *hwr.HWRClient) *IndexManager {
 }
 
 func (im *IndexManager) cacheFilePath(uid, docID, pageID string) string {
-	return filepath.Join(im.dataDir, uid, "search_cache", docID, fmt.Sprintf("%s.json", pageID))
+	return filepath.Join(im.dataDir, "users", uid, "search", "cache", docID, fmt.Sprintf("%s.json", pageID))
 }
 
 func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath string, generation int64) (*SearchIndexResponse, error) {
@@ -183,6 +183,20 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 		return nil, fmt.Errorf("failed to marshal MyScript request: %w", err)
 	}
 
+	// If no strokes to recognize, return empty index immediately
+	if len(msRequest.StrokeGroups) == 0 {
+		log.Infof("No strokes to recognize, returning empty index")
+		return &SearchIndexResponse{
+			Handwritten: HandwrittenData{
+				Content: "",
+				MainStrokes: MainStrokes{
+					Resolution: "WORD",
+					Strokes:    [][]string{},
+				},
+			},
+		}, nil
+	}
+
 	// Debug: log first stroke we're sending to MyScript
 	if len(msRequest.StrokeGroups) > 0 && len(msRequest.StrokeGroups[0].Strokes) > 0 {
 		firstStroke := msRequest.StrokeGroups[0].Strokes[0]
@@ -211,8 +225,11 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 	}
 
 	strokes := rmlines.GetStrokes(parsed)
+	log.Debugf("GetStrokes returned %d strokes", len(strokes))
 
-	var words []RecognizedWord
+	var contentParts []string
+	var strokesArray [][]string
+
 	for _, element := range jiixResponse.Elements {
 		for _, word := range element.Words {
 			if strings.TrimSpace(word.Label) == "" {
@@ -229,21 +246,36 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 			matchedCRDTIDs := mapWordToStrokes(scaledBBox, strokes)
 			strokeRefs := formatStrokeReferences(matchedCRDTIDs)
 
-			words = append(words, RecognizedWord{
-				Text:    word.Label,
-				BBox:    scaledBBox,
-				Strokes: strokeRefs,
-			})
+			contentParts = append(contentParts, word.Label)
+			strokesArray = append(strokesArray, strokeRefs)
 		}
 	}
 
-	return &SearchIndexResponse{Words: words}, nil
+	// Join words with spaces to create content string
+	content := strings.Join(contentParts, " ")
+
+	return &SearchIndexResponse{
+		Handwritten: HandwrittenData{
+			Content: content,
+			MainStrokes: MainStrokes{
+				Resolution: "WORD",
+				Strokes:    strokesArray,
+			},
+		},
+	}, nil
 }
 
 func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRequest, []StrokeMapping, error) {
 	layerStrokes := make(map[string][]rmlines.Stroke)
 
+	log.Debugf("Parsing nodes: found %d nodes", len(parsed.Nodes))
+
 	for _, node := range parsed.Nodes {
+		log.Debugf("Node has %d children", len(node.Children))
+		for i, child := range node.Children {
+			log.Debugf("  Child[%d]: Type=%s, ItemID=%s, ValueLen=%d", i, child.Type, child.ItemID, len(child.Value))
+		}
+
 		for _, child := range node.Children {
 			if child.Type != "Line" || len(child.Value) == 0 {
 				continue
@@ -270,6 +302,44 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 
 			layerStrokes[layer] = append(layerStrokes[layer], stroke)
 		}
+	}
+
+	totalStrokes := 0
+	for _, strokes := range layerStrokes {
+		totalStrokes += len(strokes)
+	}
+	log.Debugf("Built layerStrokes: %d layers with %d total strokes", len(layerStrokes), totalStrokes)
+
+	// If no strokes found, return empty request (don't send to MyScript)
+	// This handles typed text pages or empty pages
+	if totalStrokes == 0 {
+		log.Infof("No handwriting strokes found (possibly typed text page or empty page)")
+		return &MyScriptRequest{
+			ContentType:  "Raw Content",
+			Width:        14040,
+			Height:       18720,
+			XDPI:         2280,
+			YDPI:         2280,
+			StrokeGroups: []StrokeGroup{},
+			Configuration: MSConfiguration{
+				Lang: lang,
+				Export: ExportConfig{
+					JIIX: JIIXConfig{
+						Strokes: false,
+						Text: TextExport{
+							Chars: false,
+							Words: true,
+						},
+					},
+				},
+				RawContent: RawContentConfig{
+					Recognition: RecognitionConfig{
+						Shape: false,
+						Text:  true,
+					},
+				},
+			},
+		}, []StrokeMapping{}, nil
 	}
 
 	var strokeGroups []StrokeGroup
@@ -340,6 +410,12 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 			},
 		},
 	}
+
+	totalRequestStrokes := 0
+	for _, sg := range strokeGroups {
+		totalRequestStrokes += len(sg.Strokes)
+	}
+	log.Debugf("MyScript request: %d strokeGroups with %d total strokes", len(strokeGroups), totalRequestStrokes)
 
 	return request, mappings, nil
 }
