@@ -921,17 +921,14 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 
 	if fileName != "" && strings.HasSuffix(fileName, storage.RmFileExt) {
 		// Use timestamp-based generation for search (matches device behavior)
-		searchGeneration := time.Now().UnixNano() / 1000 // microseconds
+		searchGeneration := time.Now().UnixNano() / 1000
 
-		// Parse fileName to extract docID and pageID
-		// fileName format: "docID/pageID.rm"
 		var docID, pageID string
 		parts := strings.Split(fileName, "/")
 		if len(parts) == 2 {
 			docID = parts[0]
 			pageID = strings.TrimSuffix(parts[1], storage.RmFileExt)
 		} else {
-			// Fallback for unexpected format
 			docID = ""
 			pageID = strings.TrimSuffix(fileName, storage.RmFileExt)
 		}

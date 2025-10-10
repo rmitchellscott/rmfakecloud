@@ -94,7 +94,6 @@ func (hwr *HWRClient) SendRequest(data []byte) (body []byte, err error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		// Check for quota exceeded error (HTTP 403 with "access.quota.exceeded")
 		if res.StatusCode == http.StatusForbidden && strings.Contains(string(body), "access.quota.exceeded") {
 			err = fmt.Errorf("%w: %s", ErrQuotaExceeded, string(body))
 			return

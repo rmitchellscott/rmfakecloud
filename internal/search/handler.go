@@ -43,15 +43,12 @@ func NewHandler(deltaTracker *DeltaTracker, indexManager *IndexManager, dataDir 
 		userStorer:   userStorer,
 	}
 
-	// Start 5 worker goroutines
 	for i := 0; i < 5; i++ {
 		go h.indexWorker()
 	}
 
-	// Start recovery goroutine to process pending jobs
 	go h.jobRecoveryWorker()
 
-	// Load pending jobs from disk on startup
 	go h.loadPendingJobsOnStartup()
 
 	return h
@@ -68,7 +65,6 @@ func (h *Handler) indexWorker() {
 
 		index, err := h.indexManager.GetOrBuildIndex(job.uid, job.docID, job.pageID, rmFilePath, job.generation)
 		if err != nil {
-			// Check if this is a quota exceeded error
 			if errors.Is(err, hwr.ErrQuotaExceeded) {
 				log.Warnf("MyScript quota exceeded for %s/%s, will retry daily", job.docID, job.pageID)
 				h.jobQueue.UpdateJobError(job.uid, job.docID, job.pageID, "quota")
@@ -83,7 +79,6 @@ func (h *Handler) indexWorker() {
 			log.Infof("Indexed handwriting page %s/%s (%d words)", job.docID, job.pageID, len(index.Handwritten.MainStrokes.Strokes))
 		}
 
-		// Delete pending job after successful indexing
 		if err := h.jobQueue.DeleteJob(job.uid, job.docID, job.pageID); err != nil {
 			log.Warnf("Failed to delete pending job for %s/%s: %v", job.docID, job.pageID, err)
 		}
@@ -117,7 +112,6 @@ func (h *Handler) GetDelta(c *gin.Context) {
 		return
 	}
 
-	// Parse if-none-match header as "since" checkpoint
 	since := int64(0)
 	if ifNoneMatch := c.GetHeader("if-none-match"); ifNoneMatch != "" {
 		var err error
@@ -145,7 +139,6 @@ func (h *Handler) GetDelta(c *gin.Context) {
 
 	log.Debugf("Delta response: 200 OK - %+v", delta)
 
-	// Set ETag header with the generation we're returning
 	c.Header("ETag", fmt.Sprintf("%d", delta.Generation))
 	c.JSON(http.StatusOK, delta)
 }
@@ -177,7 +170,6 @@ func (h *Handler) GetSearchIndex(c *gin.Context) {
 		log.Warnf("Failed to stat file: %v", err)
 	}
 
-	// Get file modification time as generation (cache uses this to detect changes)
 	fileInfo, err := os.Stat(rmFilePath)
 	if err != nil {
 		log.Errorf("Failed to stat .rm file: %v", err)
@@ -199,7 +191,6 @@ func (h *Handler) GetSearchIndex(c *gin.Context) {
 }
 
 func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
-	// Read root to get root hash
 	rootPath := filepath.Join(h.dataDir, "users", uid, "sync", "root")
 	rootData, err := os.ReadFile(rootPath)
 	if err != nil {
@@ -207,7 +198,6 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 	}
 	rootHash := strings.TrimSpace(string(rootData))
 
-	// Parse root index to find document
 	rootIndexPath := filepath.Join(h.dataDir, "users", uid, "sync", rootHash)
 	rootIndexFile, err := os.Open(rootIndexPath)
 	if err != nil {
@@ -220,7 +210,6 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 		return "", fmt.Errorf("failed to parse root index: %w", err)
 	}
 
-	// Find the document entry
 	var docHash string
 	for _, entry := range docEntries {
 		if entry.EntryName == docID {
@@ -232,7 +221,6 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 		return "", fmt.Errorf("document %s not found", docID)
 	}
 
-	// Parse document index to find page
 	docIndexPath := filepath.Join(h.dataDir, "users", uid, "sync", docHash)
 	docIndexFile, err := os.Open(docIndexPath)
 	if err != nil {
@@ -245,7 +233,6 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 		return "", fmt.Errorf("failed to parse document index: %w", err)
 	}
 
-	// Find the page entry (looking for {docID}/{pageID}.rm)
 	targetName := fmt.Sprintf("%s/%s.rm", docID, pageID)
 	for _, entry := range pageEntries {
 		if entry.EntryName == targetName {
@@ -257,16 +244,13 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 }
 
 func (h *Handler) TrackPageModification(uid, docID, pageID string, generation int64) error {
-	// Save job to disk first (persistent storage)
 	if err := h.jobQueue.SaveJob(uid, docID, pageID, generation); err != nil {
 		log.Errorf("Failed to save pending job for %s/%s: %v", docID, pageID, err)
 		return err
 	}
 
-	// Try to submit job to worker pool (non-blocking)
 	select {
 	case h.indexQueue <- indexJob{uid, docID, pageID, generation}:
-		// Job queued successfully
 	default:
 		log.Warnf("Index queue full, job saved to disk for later processing: %s/%s", docID, pageID)
 	}
@@ -296,7 +280,6 @@ func (h *Handler) jobRecoveryWorker() {
 
 		for _, jobs := range allJobs {
 			for _, job := range jobs {
-				// Calculate backoff based on error type and retry count
 				var backoffDuration time.Duration
 				var shouldRetry bool
 
@@ -311,9 +294,9 @@ func (h *Handler) jobRecoveryWorker() {
 						shouldRetry = false
 					} else {
 						// Exponential backoff: 30s * 2^retryCount, capped at 1 hour
-						backoffSeconds := 30 * (1 << uint(job.RetryCount)) // 30, 60, 120, 240, 480, 960, 1920, 3600+
+						backoffSeconds := 30 * (1 << uint(job.RetryCount))
 						if backoffSeconds > 3600 {
-							backoffSeconds = 3600 // Cap at 1 hour
+							backoffSeconds = 3600
 						}
 						backoffDuration = time.Duration(backoffSeconds) * time.Second
 						shouldRetry = true
@@ -324,18 +307,14 @@ func (h *Handler) jobRecoveryWorker() {
 					continue
 				}
 
-				// Check if enough time has passed since last attempt
 				timeSinceLastAttempt := time.Since(job.LastAttempt)
 				if timeSinceLastAttempt < backoffDuration {
 					continue
 				}
 
-				// Try to enqueue (non-blocking)
 				select {
 				case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
-					// Job queued for retry
 				default:
-					// Queue full, will retry later
 					return
 				}
 			}
@@ -344,7 +323,6 @@ func (h *Handler) jobRecoveryWorker() {
 }
 
 func (h *Handler) loadPendingJobsOnStartup() {
-	// Wait a bit for the system to stabilize
 	time.Sleep(5 * time.Second)
 
 	allJobs, err := h.jobQueue.GetAllPendingJobs()
@@ -367,18 +345,14 @@ func (h *Handler) loadPendingJobsOnStartup() {
 
 	for _, jobs := range allJobs {
 		for _, job := range jobs {
-			// Skip non-quota errors that have exceeded retry limit
 			if job.ErrorType != "quota" && job.RetryCount >= 10 {
 				log.Warnf("Startup: job %s/%s has failed %d times (non-quota), giving up", job.DocID, job.PageID, job.RetryCount)
 				continue
 			}
 
-			// Try to enqueue (non-blocking)
 			select {
 			case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
-				// Job queued
 			default:
-				// Queue full, recovery worker will handle remaining jobs
 				return
 			}
 		}
@@ -388,7 +362,6 @@ func (h *Handler) loadPendingJobsOnStartup() {
 }
 
 func (h *Handler) HandleError(c *gin.Context) {
-	// Device reports search errors here - just accept them
 	c.Status(http.StatusAccepted)
 }
 

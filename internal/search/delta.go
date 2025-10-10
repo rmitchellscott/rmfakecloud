@@ -39,25 +39,21 @@ func generateDeltaID() string {
 func (dt *DeltaTracker) getPagesFromCache(uid string, since int64) ([]PageChange, error) {
 	cacheDir := filepath.Join(dt.dataDir, "users", uid, "search", "cache")
 
-	// Check if cache directory exists
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return []PageChange{}, nil
 	}
 
 	var pages []PageChange
 
-	// Walk through cache directory structure: cache/{docID}/{pageID}.json
 	err := filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip directories and non-JSON files
 		if info.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
 		}
 
-		// Read and parse cache file
 		data, err := os.ReadFile(path)
 		if err != nil {
 			log.Warnf("Failed to read cache file %s: %v", path, err)
@@ -70,17 +66,14 @@ func (dt *DeltaTracker) getPagesFromCache(uid string, since int64) ([]PageChange
 			return nil
 		}
 
-		// Skip typed text pages (no handwriting)
 		if len(cached.Response.Handwritten.MainStrokes.Strokes) == 0 {
 			return nil
 		}
 
-		// Skip if generation <= since (already acknowledged)
 		if cached.Generation <= since {
 			return nil
 		}
 
-		// Extract docID and pageID from path: cache/{docID}/{pageID}.json
 		relPath, err := filepath.Rel(cacheDir, path)
 		if err != nil {
 			log.Warnf("Failed to get relative path for %s: %v", path, err)
@@ -118,14 +111,12 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 	dt.mu.RLock()
 	defer dt.mu.RUnlock()
 
-	// Get all pages from cache with generation > since
 	pages, err := dt.getPagesFromCache(uid, since)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(pages) == 0 {
-		// No new changes, caller will return 304
 		return &DeltaResponse{
 			Version:    1,
 			Generation: since,
@@ -134,14 +125,11 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 		}, nil
 	}
 
-	// Sort by generation for consistent pagination
 	sort.Slice(pages, func(i, j int) bool {
 		return pages[i].Generation < pages[j].Generation
 	})
 
-	// Paginate the response
 	if len(pages) <= PageSize {
-		// Return all pages
 		responseGeneration := pages[len(pages)-1].Generation
 		log.Debugf("Delta sync (since=%d): returning %d pages, latest=true, generation=%d",
 			since, len(pages), responseGeneration)
@@ -154,7 +142,6 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 		}, nil
 	}
 
-	// Return first batch
 	responseGeneration := pages[PageSize-1].Generation
 	log.Debugf("Delta sync (since=%d): returning %d/%d pages, latest=false, generation=%d",
 		since, PageSize, len(pages), responseGeneration)

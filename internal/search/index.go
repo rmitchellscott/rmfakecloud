@@ -21,13 +21,13 @@ import (
 const SCALE_FACTOR = 8.976
 
 type MyScriptRequest struct {
-	ContentType   string           `json:"contentType"`
-	Width         int              `json:"width"`
-	Height        int              `json:"height"`
-	XDPI          int              `json:"xDPI"`
-	YDPI          int              `json:"yDPI"`
-	StrokeGroups  []StrokeGroup    `json:"strokeGroups"`
-	Configuration MSConfiguration  `json:"configuration"`
+	ContentType   string          `json:"contentType"`
+	Width         int             `json:"width"`
+	Height        int             `json:"height"`
+	XDPI          int             `json:"xDPI"`
+	YDPI          int             `json:"yDPI"`
+	StrokeGroups  []StrokeGroup   `json:"strokeGroups"`
+	Configuration MSConfiguration `json:"configuration"`
 }
 
 type StrokeGroup struct {
@@ -77,8 +77,8 @@ type MSElement struct {
 }
 
 type MSWord struct {
-	Label       string      `json:"label"`
-	BoundingBox MSBBox      `json:"bounding-box"`
+	Label       string `json:"label"`
+	BoundingBox MSBBox `json:"bounding-box"`
 }
 
 type MSBBox struct {
@@ -115,7 +115,6 @@ func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath st
 
 	if cached, err := im.loadCachedIndex(cachePath); err == nil {
 		if cached.Generation == generation {
-			// Set version and generation from cache into response
 			cached.Response.Version = 1
 			cached.Response.Generation = cached.Generation
 			return &cached.Response, nil
@@ -128,7 +127,6 @@ func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath st
 		return nil, err
 	}
 
-	// Set version and generation in response before saving
 	index.Version = 1
 	index.Generation = generation
 
@@ -188,7 +186,6 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 		return nil, fmt.Errorf("failed to marshal MyScript request: %w", err)
 	}
 
-	// If no strokes to recognize, return empty index immediately
 	if len(msRequest.StrokeGroups) == 0 {
 		log.Infof("No strokes to recognize, returning empty index")
 		return &SearchIndexResponse{
@@ -238,7 +235,6 @@ func (im *IndexManager) buildIndex(rmFilePath string) (*SearchIndexResponse, err
 		}
 	}
 
-	// Join words with spaces to create content string
 	content := strings.Join(contentParts, " ")
 
 	return &SearchIndexResponse{
@@ -289,8 +285,6 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 		totalStrokes += len(strokes)
 	}
 
-	// If no strokes found, return empty request (don't send to MyScript)
-	// This handles typed text pages or empty pages
 	if totalStrokes == 0 {
 		log.Infof("No handwriting strokes found (possibly typed text page or empty page)")
 		return &MyScriptRequest{
@@ -340,7 +334,6 @@ func convertToMyScriptFormat(parsed *rmlines.ParsedRM, lang string) (*MyScriptRe
 			var yCoords []float64
 
 			for _, point := range stroke.Points {
-				// Multiply by 10 to match device behavior (MyScript expects coordinates × 10)
 				xCoords = append(xCoords, point.X*10)
 				yCoords = append(yCoords, point.Y*10)
 			}
