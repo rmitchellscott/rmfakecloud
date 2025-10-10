@@ -149,6 +149,11 @@ func parseIndex(r io.Reader) ([]*HashEntry, error) {
 	return entries, nil
 }
 
+// ParseIndex parses a sync index file and returns the entries
+func ParseIndex(r io.Reader) ([]*HashEntry, error) {
+	return parseIndex(r)
+}
+
 // RootIndex reads the root index
 func (t *HashTree) RootIndex() (io.ReadCloser, error) {
 	pipeReader, pipeWriter := io.Pipe()

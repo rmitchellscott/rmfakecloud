@@ -14,8 +14,9 @@ type DeltaResponse struct {
 
 type PageChange struct {
 	Generation int64  `json:"generation"`
-	DocumentID string `json:"documentId"`
+	DocumentID string `json:"documentId,omitempty"`
 	PageID     string `json:"pageId"`
+	Deleted    bool   `json:"deleted,omitempty"`
 }
 
 type SearchIndexResponse struct {

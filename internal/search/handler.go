@@ -36,6 +36,7 @@ func (h *Handler) GetSettings(c *gin.Context) {
 func (h *Handler) GetDelta(c *gin.Context) {
 	uid := c.GetString("UserID")
 	if uid == "" {
+		log.Warnf("Delta request with no UserID")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
@@ -46,10 +47,13 @@ func (h *Handler) GetDelta(c *gin.Context) {
 		var err error
 		since, err = strconv.ParseInt(sinceStr, 10, 64)
 		if err != nil {
+			log.Warnf("Delta request with invalid since parameter: %s", sinceStr)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid since parameter"})
 			return
 		}
 	}
+
+	log.Infof("Delta request from user %s, since=%d", uid, since)
 
 	delta, err := h.deltaTracker.GetDelta(uid, since)
 	if err != nil {
@@ -59,9 +63,12 @@ func (h *Handler) GetDelta(c *gin.Context) {
 	}
 
 	if len(delta.Changed) == 0 {
+		log.Infof("Delta response: 304 Not Modified (no changes since %d)", since)
 		c.Status(http.StatusNotModified)
 		return
 	}
+
+	log.Infof("Delta response: 200 OK - %+v", delta)
 
 	c.JSON(http.StatusOK, delta)
 }
@@ -106,6 +113,12 @@ func (h *Handler) getRmFilePath(uid, pageID string) string {
 
 func (h *Handler) TrackPageModification(uid, docID, pageID string, generation int64) error {
 	return h.deltaTracker.TrackPageChange(uid, docID, pageID, generation)
+}
+
+func (h *Handler) HandleError(c *gin.Context) {
+	// Device reports search errors here - just accept them
+	log.Debug("Received search error report from device")
+	c.Status(http.StatusAccepted)
 }
 
 func RegisterRoutes(router *gin.RouterGroup, handler *Handler) {
