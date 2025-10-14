@@ -111,7 +111,7 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           outputs: type=local,dest=./dist-amd64
-          target: gobuilder
+          target: final
           cache-from: type=gha
 
       - name: Build and extract binaries (arm64)
@@ -122,7 +122,7 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           outputs: type=local,dest=./dist-arm64
-          target: gobuilder
+          target: final
           cache-from: type=gha
 
       - name: Rename and prepare artifacts

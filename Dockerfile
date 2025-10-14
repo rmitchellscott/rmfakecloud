@@ -62,7 +62,7 @@ RUN --mount=type=cache,target=/root/.cache \
     -o /rmfakecloud ./cmd/rmfakecloud/ && \
     xx-verify --static /rmfakecloud
 
-FROM scratch
+FROM scratch AS final
 EXPOSE 3000
 ADD ./docker/rootfs.tar /
 COPY --from=gobuilder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
