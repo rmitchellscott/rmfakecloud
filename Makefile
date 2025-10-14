@@ -73,5 +73,5 @@ testui:
 	#CI=true $(PNPM) test
 
 testgo:
-	go test ./...
+	go test -tags nolibrm ./...
 

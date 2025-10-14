@@ -43,7 +43,7 @@ jobs:
         run: make testui
 
       - name: Test Go
-        run: make testgo
+        run: go test -tags nolibrm ./...
 
   build:
     name: Build Multi-Platform
