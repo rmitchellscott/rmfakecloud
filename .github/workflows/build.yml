@@ -33,6 +33,12 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: ui/pnpm-lock.yaml
 
+      - name: Install UI dependencies
+        run: cd ui && pnpm install
+
+      - name: Build UI
+        run: cd ui && pnpm build
+
       - name: Test UI
         run: make testui
 
