@@ -1,9 +1,8 @@
 package rmlines
 
 /*
-#cgo CPPFLAGS: -I${SRCDIR}/librm_lines/rm_lines/headers
+#cgo CPPFLAGS: -I${SRCDIR}/librm_lines/include/headers
 #cgo CXXFLAGS: -std=c++20
-#cgo LDFLAGS: -L${SRCDIR}/librm_lines/build -lrm_lines -lstdc++ -lm
 #include <stdbool.h>
 #include <stdlib.h>
 

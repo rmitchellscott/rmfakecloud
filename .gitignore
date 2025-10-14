@@ -24,3 +24,6 @@ assets_vfsdata.go
 
 # mkdoc build
 site/
+
+# Downloaded librm_lines artifacts
+internal/rmlines/librm_lines/

@@ -13,9 +13,12 @@ UIFILES += ui/package.json
 TARGETS := $(addprefix $(OUT_DIR)/$(BINARY)-, x64 armv6 armv7 arm64 win64 docker)
 PNPM	= cd ui; pnpm
 
-.PHONY: all run runui clean test testgo testui
+.PHONY: all run runui clean test testgo testui deps
 
-build: $(OUT_DIR)/$(BINARY)-x64
+deps:
+	go generate ./...
+
+build: deps $(OUT_DIR)/$(BINARY)-x64
 
 all: $(TARGETS)
 

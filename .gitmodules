@@ -1,4 +1,0 @@
-[submodule "internal/rmlines/librm_lines"]
-	path = internal/rmlines/librm_lines
-	url = https://github.com/rmitchellscott/librm_lines.git
-	branch = crdt-id
