@@ -87,8 +87,8 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
           outputs: type=local,dest=./dist
           target: binaries
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=buildx-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=buildx-${{ matrix.platform }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -151,4 +151,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
-          cache-from: type=gha
+          cache-from: |
+            type=gha,scope=buildx-linux/amd64
+            type=gha,scope=buildx-linux/arm64
+            type=gha,scope=buildx-linux/arm/v7
+          cache-to: type=gha,mode=max
