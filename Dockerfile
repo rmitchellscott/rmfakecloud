@@ -62,6 +62,9 @@ RUN --mount=type=cache,target=/root/.cache \
     -o /rmfakecloud ./cmd/rmfakecloud/ && \
     xx-verify --static /rmfakecloud
 
+FROM scratch AS binaries
+COPY --from=gobuilder /rmfakecloud /rmfakecloud
+
 FROM scratch AS final
 EXPOSE 3000
 ADD ./docker/rootfs.tar /
