@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	url = "https://cloud.myscript.com/api/v4.0/iink/batch"
-
 	// JIIX jiix type
 	JIIX = "application/vnd.myscript.jiix"
 )
@@ -54,6 +52,8 @@ func DoLangOverride(originalData []byte, overrideLang string) ([]byte, error) {
 
 // SendRequest sends the request
 func (hwr *HWRClient) SendRequest(data []byte) (body []byte, err error) {
+	url := hwr.Cfg.HWRHost + "/api/v4.0/iink/batch"
+
 	if hwr.Cfg.HWRLangOverride != "" {
 		overrideLang := hwr.Cfg.HWRLangOverride
 		modifiedData, err := DoLangOverride(data, overrideLang)

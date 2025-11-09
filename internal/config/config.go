@@ -69,6 +69,8 @@ const (
 	envHwrApplicationKey = "RMAPI_HWR_APPLICATIONKEY"
 	// envHwrHmac myScript hmac key
 	envHwrHmac = "RMAPI_HWR_HMAC"
+	// envHwrHost custom myScript host
+	envHwrHost = "RMAPI_HWR_HOST"
 	// envHwrLangOverride override the language specified in myScript requests
 	envHwrLangOverride = "RMAPI_HWR_LANG_OVERRIDE"
 	// EnvLogFile log file to use
@@ -93,6 +95,7 @@ type Config struct {
 	LogFile           string
 	HWRApplicationKey string
 	HWRHmac           string
+	HWRHost           string
 	HWRLangOverride   string
 	HTTPSCookie       bool
 	TrustProxy        bool
@@ -213,12 +216,23 @@ func FromEnv() *Config {
 		}
 	}
 
+	// myScript HWR host
+	hwrHost := "https://cloud.myscript.com"
+	hwrHostEnv := os.Getenv(envHwrHost)
+	if hwrHostEnv != "" {
+		u, err := url.Parse(hwrHostEnv)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			log.Fatalf("%s '%s' cannot be parsed, or missing scheme (http|https) %v", envHwrHost, hwrHostEnv, err)
+		}
+		hwrHost = hwrHostEnv
+	}
+
 	trustProxy, _ := strconv.ParseBool(os.Getenv(envTrustProxy))
 
 	cfg := Config{
 		Port:              port,
 		StorageURL:        uploadURL,
-		CloudHost: cloudHost,
+		CloudHost:         cloudHost,
 		DataDir:           dataDir,
 		JWTSecretKey:      dk,
 		JWTRandom:         jwtGenerated,
@@ -227,6 +241,7 @@ func FromEnv() *Config {
 		SMTPConfig:        smtpCfg,
 		HWRApplicationKey: os.Getenv(envHwrApplicationKey),
 		HWRHmac:           os.Getenv(envHwrHmac),
+		HWRHost:           hwrHost,
 		HWRLangOverride:   os.Getenv(envHwrLangOverride),
 		HTTPSCookie:       httpsCookie,
 		TrustProxy:        trustProxy,
@@ -267,6 +282,8 @@ Emails, smtp:
 myScript hwr (needs a developer account):
 	%s
 	%s
+	%s	custom myScript host URL (default: https://cloud.myscript.com)
+			supports http/https and custom ports (e.g., https://custom.myscript.com:8443)
 	%s      override the language specified in myScript requests
 `,
 		envJWTSecretKey,
@@ -294,6 +311,7 @@ myScript hwr (needs a developer account):
 
 		envHwrApplicationKey,
 		envHwrHmac,
+		envHwrHost,
 		envHwrLangOverride,
 	)
 }
