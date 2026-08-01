@@ -16,6 +16,7 @@ type PendingJob struct {
 	UID         string    `json:"uid"`
 	DocID       string    `json:"docId"`
 	PageID      string    `json:"pageId"`
+	BlobHash    string    `json:"blobHash,omitempty"`
 	Generation  int64     `json:"generation"`
 	Timestamp   time.Time `json:"timestamp"`
 	RetryCount  int       `json:"retryCount"`
@@ -43,7 +44,7 @@ func (jq *JobQueue) jobFilePath(uid, docID, pageID string) string {
 	return filepath.Join(jq.pendingDir(uid), filename)
 }
 
-func (jq *JobQueue) SaveJob(uid, docID, pageID string, generation int64) error {
+func (jq *JobQueue) SaveJob(uid, docID, pageID, blobHash string, generation int64) error {
 	jq.mu.Lock()
 	defer jq.mu.Unlock()
 
@@ -52,6 +53,7 @@ func (jq *JobQueue) SaveJob(uid, docID, pageID string, generation int64) error {
 		UID:         uid,
 		DocID:       docID,
 		PageID:      pageID,
+		BlobHash:    blobHash,
 		Generation:  generation,
 		Timestamp:   now,
 		RetryCount:  0,

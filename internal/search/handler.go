@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ddvk/rmfakecloud/internal/common"
 	"github.com/ddvk/rmfakecloud/internal/hwr"
 	"github.com/ddvk/rmfakecloud/internal/storage"
 	"github.com/ddvk/rmfakecloud/internal/storage/models"
@@ -30,6 +31,7 @@ type indexJob struct {
 	uid        string
 	docID      string
 	pageID     string
+	blobHash   string
 	generation int64
 }
 
@@ -56,7 +58,7 @@ func NewHandler(deltaTracker *DeltaTracker, indexManager *IndexManager, dataDir 
 
 func (h *Handler) indexWorker() {
 	for job := range h.indexQueue {
-		rmFilePath, err := h.getRmFilePath(job.uid, job.docID, job.pageID)
+		rmFilePath, err := h.resolveRmFilePath(job)
 		if err != nil {
 			log.Warnf("Failed to get rm file path for %s/%s: %v", job.docID, job.pageID, err)
 			h.jobQueue.UpdateJobError(job.uid, job.docID, job.pageID, "other")
@@ -190,6 +192,15 @@ func (h *Handler) GetSearchIndex(c *gin.Context) {
 	c.JSON(http.StatusOK, index)
 }
 
+func (h *Handler) resolveRmFilePath(job indexJob) (string, error) {
+	if job.blobHash != "" {
+		// StoreBlob sanitizes before writing, so the same call is what makes
+		// this resolve to the file that was written.
+		return filepath.Join(h.dataDir, "users", job.uid, "sync", common.Sanitize(job.blobHash)), nil
+	}
+	return h.getRmFilePath(job.uid, job.docID, job.pageID)
+}
+
 func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 	rootPath := filepath.Join(h.dataDir, "users", uid, "sync", "root")
 	rootData, err := os.ReadFile(rootPath)
@@ -243,14 +254,14 @@ func (h *Handler) getRmFilePath(uid, docID, pageID string) (string, error) {
 	return "", fmt.Errorf("page %s not found in document %s", pageID, docID)
 }
 
-func (h *Handler) TrackPageModification(uid, docID, pageID string, generation int64) error {
-	if err := h.jobQueue.SaveJob(uid, docID, pageID, generation); err != nil {
+func (h *Handler) TrackPageModification(uid, docID, pageID, blobHash string, generation int64) error {
+	if err := h.jobQueue.SaveJob(uid, docID, pageID, blobHash, generation); err != nil {
 		log.Errorf("Failed to save pending job for %s/%s: %v", docID, pageID, err)
 		return err
 	}
 
 	select {
-	case h.indexQueue <- indexJob{uid, docID, pageID, generation}:
+	case h.indexQueue <- indexJob{uid, docID, pageID, blobHash, generation}:
 	default:
 		log.Warnf("Index queue full, job saved to disk for later processing: %s/%s", docID, pageID)
 	}
@@ -313,7 +324,7 @@ func (h *Handler) jobRecoveryWorker() {
 				}
 
 				select {
-				case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
+				case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.BlobHash, job.Generation}:
 				default:
 					return
 				}
@@ -351,7 +362,7 @@ func (h *Handler) loadPendingJobsOnStartup() {
 			}
 
 			select {
-			case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.Generation}:
+			case h.indexQueue <- indexJob{job.UID, job.DocID, job.PageID, job.BlobHash, job.Generation}:
 			default:
 				return
 			}

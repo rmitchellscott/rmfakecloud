@@ -935,7 +935,7 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 			pageID = strings.TrimSuffix(fileName, storage.RmFileExt)
 		}
 
-		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, searchGeneration); err != nil {
+		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, blobID, searchGeneration); err != nil {
 			log.Warnf("Failed to track page modification: %v", err)
 		}
 	}

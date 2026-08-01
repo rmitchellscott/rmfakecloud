@@ -89,7 +89,7 @@ func ScanUserDocuments(uid string, dataDir string, handler *Handler) (int, int, 
 			// Check if we need to index this page
 			if shouldIndexPage(handler.indexManager, uid, entryDocID, pageID, generation) {
 				// Queue for indexing
-				if err := handler.TrackPageModification(uid, entryDocID, pageID, generation); err != nil {
+				if err := handler.TrackPageModification(uid, entryDocID, pageID, pageEntry.Hash, generation); err != nil {
 					log.Warnf("Failed to queue page %s/%s: %v", entryDocID, pageID, err)
 					continue
 				}
