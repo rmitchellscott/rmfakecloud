@@ -153,6 +153,10 @@ func (app *App) newUserToken(c *gin.Context) {
 		scopes = append(scopes, "hwcmail:-1", "hwc")
 	}
 
+	if user.Search {
+		scopes = append(scopes, "hws")
+	}
+
 	if app.cfg.SMTPConfig != nil {
 		scopes = append(scopes, "mail:-1")
 	}
@@ -915,6 +919,25 @@ func (app *App) blobStorageWrite(c *gin.Context) {
 		log.Error(err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
+	}
+
+	if fileName != "" && strings.HasSuffix(fileName, storage.RmFileExt) {
+		// Use timestamp-based generation for search (matches device behavior)
+		searchGeneration := time.Now().UnixNano() / 1000
+
+		var docID, pageID string
+		parts := strings.Split(fileName, "/")
+		if len(parts) == 2 {
+			docID = parts[0]
+			pageID = strings.TrimSuffix(parts[1], storage.RmFileExt)
+		} else {
+			docID = ""
+			pageID = strings.TrimSuffix(fileName, storage.RmFileExt)
+		}
+
+		if err := app.searchHandler.TrackPageModification(uid, docID, pageID, searchGeneration); err != nil {
+			log.Warnf("Failed to track page modification: %v", err)
+		}
 	}
 
 	c.Status(http.StatusOK)

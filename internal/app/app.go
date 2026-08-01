@@ -17,6 +17,7 @@ import (
 	"github.com/ddvk/rmfakecloud/internal/hwr"
 	"github.com/ddvk/rmfakecloud/internal/mqtt"
 	"github.com/ddvk/rmfakecloud/internal/screenshare"
+	"github.com/ddvk/rmfakecloud/internal/search"
 	"github.com/ddvk/rmfakecloud/internal/storage"
 
 	"github.com/ddvk/rmfakecloud/internal/storage/fs"
@@ -46,6 +47,7 @@ type App struct {
 	hwrClient     *hwr.HWRClient
 	mqttBroker    *mqtt.Broker
 	roomManager   *screenshare.RoomManager
+	searchHandler *search.Handler
 }
 
 // Start starts the app
@@ -135,6 +137,11 @@ func NewApp(cfg *config.Config) App {
 		log.Warn("No users found, the first login will create a user")
 		//TODO: not thread safe
 		cfg.CreateFirstUser = true
+	} else {
+		// Run migration to ensure all user profiles have the search field
+		if err := fsStorage.MigrateUserProfiles(); err != nil {
+			log.Warnf("Failed to migrate user profiles: %v", err)
+		}
 	}
 	ntfHub := hub.NewHub()
 	pcStore := passcodestore.NewInMemory()
@@ -159,6 +166,18 @@ func NewApp(cfg *config.Config) App {
 		router.Use(requestLoggerMiddleware())
 	}
 
+	hwrClient := &hwr.HWRClient{
+		Cfg: cfg,
+	}
+
+	deltaTracker, err := search.NewDeltaTracker(cfg.DataDir)
+	if err != nil {
+		log.Warnf("Failed to initialize delta tracker: %v", err)
+	}
+
+	indexManager := search.NewIndexManager(cfg.DataDir, hwrClient)
+	searchHandler := search.NewHandler(deltaTracker, indexManager, cfg.DataDir, fsStorage)
+
 	app := App{
 		router:        router,
 		cfg:           cfg,
@@ -169,9 +188,8 @@ func NewApp(cfg *config.Config) App {
 		hub:           ntfHub,
 		passcodeStore: pcStore,
 		codeConnector: codeConnector,
-		hwrClient: &hwr.HWRClient{
-			Cfg: cfg,
-		},
+		hwrClient:     hwrClient,
+		searchHandler: searchHandler,
 	}
 
 	roomMgr := screenshare.NewRoomManager()

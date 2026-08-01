@@ -166,5 +166,11 @@ func (app *App) registerRoutes(router *gin.Engine) {
 
 		// reports
 		authRoutes.POST("/sync/reports/v1", app.syncReports)
+
+		// search
+		authRoutes.GET("/search/v1/settings", app.searchHandler.GetSettings)
+		authRoutes.GET("/search/v1/delta", app.searchHandler.GetDelta)
+		authRoutes.GET("/search/v1/:docId/:pageId", app.searchHandler.GetSearchIndex)
+		authRoutes.POST("/search/v1/error", app.searchHandler.HandleError)
 	}
 }

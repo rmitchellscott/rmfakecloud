@@ -27,7 +27,7 @@ See the [documentation](https://ddvk.github.io/rmfakecloud/remarkable/setup/) fo
 | File synchronization (1.5, 2, 3, 4) | ✅ |  |
 | [Send document by email](https://ddvk.github.io/rmfakecloud/install/configuration/#email-settings) | ✅ |  |
 | [Handwriting recognition](https://ddvk.github.io/rmfakecloud/install/configuration/#handwriting-recognition) | ✅ |  |
-| Handwriting search | ❌ |  |
+| Handwriting search | ✅ |  |
 | [Screen sharing](https://ddvk.github.io/rmfakecloud/install/configuration/#screen-sharing) | ✅ |  |
 | [Storage integrations](https://ddvk.github.io/rmfakecloud/usage/integrations/) | ✅ |  |
 | Integration with Dropbox | 🟡 | [WIP](https://github.com/ddvk/rmfakecloud/blob/master/internal/integrations/dropbox.go) |

@@ -6,9 +6,11 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/ddvk/rmfakecloud/internal/config"
 )
@@ -19,6 +21,11 @@ const (
 
 	// JIIX jiix type
 	JIIX = "application/vnd.myscript.jiix"
+)
+
+var (
+	// ErrQuotaExceeded is returned when MyScript quota is exceeded
+	ErrQuotaExceeded = errors.New("MyScript quota exceeded")
 )
 
 type HWRClient struct {
@@ -93,7 +100,11 @@ func (hwr *HWRClient) SendRequest(data []byte) (body []byte, err error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		err = fmt.Errorf("not ok, Status: %d", res.StatusCode)
+		if res.StatusCode == http.StatusForbidden && strings.Contains(string(body), "access.quota.exceeded") {
+			err = fmt.Errorf("%w: %s", ErrQuotaExceeded, string(body))
+			return
+		}
+		err = fmt.Errorf("not ok, Status: %d, Body: %s", res.StatusCode, string(body))
 		return
 	}
 

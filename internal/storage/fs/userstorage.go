@@ -157,3 +157,60 @@ func (fs *FileSystemStorage) RemoveUser(uid string) (err error) {
 
 	return
 }
+
+// MigrateUserProfiles ensures all user profiles have the search field explicitly set
+func (fs *FileSystemStorage) MigrateUserProfiles() error {
+	users, err := fs.GetUsers()
+	if err != nil {
+		return fmt.Errorf("failed to get users for migration: %w", err)
+	}
+
+	migratedCount := 0
+	for _, user := range users {
+		profilePath := fs.getPathFromUser(user.ID, profileName)
+
+		// Read raw profile content to check if search field exists
+		content, err := os.ReadFile(profilePath)
+		if err != nil {
+			log.Warnf("Failed to read profile for migration check: %s: %v", user.ID, err)
+			continue
+		}
+
+		// Check if the search field is present in the YAML
+		// This is a simple string check - if "search:" appears, we assume it's already migrated
+		if !containsSearchField(content) {
+			// Field is missing, update the profile to include it
+			user.Search = false
+			if err := fs.UpdateUser(user); err != nil {
+				log.Warnf("Failed to migrate user profile %s: %v", user.ID, err)
+				continue
+			}
+			migratedCount++
+			log.Infof("Migrated user profile %s: added search: false", user.ID)
+		}
+	}
+
+	if migratedCount > 0 {
+		log.Infof("User profile migration complete: updated %d profiles", migratedCount)
+	}
+
+	return nil
+}
+
+// containsSearchField checks if the YAML content contains the search field
+func containsSearchField(content []byte) bool {
+	// Simple check: look for "search:" in the YAML content
+	// This works because YAML field names are always followed by a colon
+	for i := 0; i < len(content)-7; i++ {
+		if content[i] == 's' &&
+		   content[i+1] == 'e' &&
+		   content[i+2] == 'a' &&
+		   content[i+3] == 'r' &&
+		   content[i+4] == 'c' &&
+		   content[i+5] == 'h' &&
+		   content[i+6] == ':' {
+			return true
+		}
+	}
+	return false
+}
