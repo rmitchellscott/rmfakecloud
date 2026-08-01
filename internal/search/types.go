@@ -54,9 +54,9 @@ type MainStrokes struct {
 }
 
 type RecognizedWord struct {
-	Text    string        `json:"text"`
-	BBox    BoundingBox   `json:"bbox"`
-	Strokes []string      `json:"strokes"`
+	Text    string      `json:"text"`
+	BBox    BoundingBox `json:"bbox"`
+	Strokes []string    `json:"strokes"`
 }
 
 type BoundingBox struct {
@@ -67,6 +67,10 @@ type BoundingBox struct {
 }
 
 type CachedIndex struct {
-	Generation int64                `json:"generation"`
-	Response   SearchIndexResponse  `json:"response"`
+	Generation int64               `json:"generation"`
+	SourceHash string              `json:"sourceHash,omitempty"`
+	Failed     bool                `json:"failed,omitempty"`
+	Attempts   int                 `json:"attempts,omitempty"`
+	LastError  string              `json:"lastError,omitempty"`
+	Response   SearchIndexResponse `json:"response"`
 }

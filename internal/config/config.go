@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/ddvk/rmfakecloud/internal/email"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +82,8 @@ const (
 	envMQTTPort          = "MQTT_PORT"
 	envICEServers        = "ICE_SERVERS"
 	envHashSchemaVersion = "HASH_SCHEMA_VERSION"
+	// envSearchReconcile how often to sweep for unindexed pages, 0 disables
+	envSearchReconcile = "RM_SEARCH_RECONCILE_INTERVAL"
 )
 
 // Config config
@@ -106,6 +109,7 @@ type Config struct {
 	MQTTPort          string
 	ICEServers        []interface{}
 	HashSchemaVersion string
+	SearchReconcile   time.Duration
 }
 
 // Verify verify
@@ -258,6 +262,15 @@ func FromEnv() *Config {
 	}
 	iceServers = normalizeICEServers(iceServers)
 
+	searchReconcile := 6 * time.Hour
+	if v := os.Getenv(envSearchReconcile); v != "" {
+		parsed, err := time.ParseDuration(v)
+		if err != nil {
+			log.Fatalf("%s '%s' is not a duration: %v", envSearchReconcile, v, err)
+		}
+		searchReconcile = parsed
+	}
+
 	hashSchemaVersion := os.Getenv(envHashSchemaVersion)
 	if hashSchemaVersion == "" {
 		hashSchemaVersion = "3"
@@ -284,6 +297,7 @@ func FromEnv() *Config {
 		MQTTPort:          mqttPort,
 		ICEServers:        iceServers,
 		HashSchemaVersion: hashSchemaVersion,
+		SearchReconcile:   searchReconcile,
 	}
 	return &cfg
 }
@@ -377,6 +391,7 @@ General:
 	%s Send auth cookie only via https
 	%s	Trust the proxy for X-Forwarded-For/X-Real-IP (set only if behind a proxy)
 	%s	Hash tree schema version: "3" or "4" (default: 3)
+	%s	Handwriting search reconcile interval (default: 6h, 0 disables)
 
 MQTT (for screenshare):
 	%s	MQTT TCP port (default: 8883)
@@ -414,6 +429,7 @@ myScript hwr (needs a developer account):
 		envHTTPSCookie,
 		envTrustProxy,
 		envHashSchemaVersion,
+		envSearchReconcile,
 
 		envMQTTPort,
 		envICEServers,

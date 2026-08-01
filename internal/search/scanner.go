@@ -78,39 +78,32 @@ func ScanUserDocuments(uid string, dataDir string, handler *Handler) (int, int, 
 			// Resolve hash to filesystem path
 			rmFilePath := filepath.Join(dataDir, "users", uid, "sync", pageEntry.Hash)
 
-			// Get file generation (mtime)
-			fileInfo, err := os.Stat(rmFilePath)
-			if err != nil {
+			if !shouldIndexPage(handler.indexManager, uid, entryDocID, pageID, pageEntry.Hash) {
+				skipped++
+				continue
+			}
+
+			if _, err := os.Stat(rmFilePath); err != nil {
 				log.Warnf("Failed to stat .rm file %s/%s: %v", entryDocID, pageID, err)
 				continue
 			}
-			generation := fileInfo.ModTime().UnixNano() / 1000
 
-			// Check if we need to index this page
-			if shouldIndexPage(handler.indexManager, uid, entryDocID, pageID, generation) {
-				// Queue for indexing
-				if err := handler.TrackPageModification(uid, entryDocID, pageID, pageEntry.Hash, generation); err != nil {
-					log.Warnf("Failed to queue page %s/%s: %v", entryDocID, pageID, err)
-					continue
-				}
-				queued++
-			} else {
-				skipped++
+			if err := handler.QueueBackfill(uid, entryDocID, pageID, pageEntry.Hash); err != nil {
+				log.Warnf("Failed to queue page %s/%s: %v", entryDocID, pageID, err)
+				continue
 			}
+			queued++
 		}
 	}
 
 	return queued, skipped, nil
 }
 
-// shouldIndexPage checks if a page needs to be indexed by comparing the cache generation
-func shouldIndexPage(im *IndexManager, uid, docID, pageID string, generation int64) bool {
-	cachePath := im.cacheFilePath(uid, docID, pageID)
-	cached, err := im.loadCachedIndex(cachePath)
+// shouldIndexPage compares the source blob hash; a terminal failure counts as handled.
+func shouldIndexPage(im *IndexManager, uid, docID, pageID, sourceHash string) bool {
+	cached, err := im.loadCachedIndex(im.cacheFilePath(uid, docID, pageID))
 	if err != nil {
-		// No cache or error reading cache = need to index
 		return true
 	}
-	// Cache exists - check if generation matches
-	return cached.Generation != generation
+	return cached.SourceHash != sourceHash
 }

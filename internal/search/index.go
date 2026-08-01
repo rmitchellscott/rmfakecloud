@@ -110,15 +110,16 @@ func (im *IndexManager) cacheFilePath(uid, docID, pageID string) string {
 	return filepath.Join(im.dataDir, "users", uid, "search", "cache", docID, fmt.Sprintf("%s.json", pageID))
 }
 
-func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath string, generation int64) (*SearchIndexResponse, error) {
+func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID, rmFilePath, sourceHash string, generation int64) (*SearchIndexResponse, error) {
 	cachePath := im.cacheFilePath(uid, docID, pageID)
 
-	if cached, err := im.loadCachedIndex(cachePath); err == nil {
-		if cached.Generation == generation {
-			cached.Response.Version = 1
-			cached.Response.Generation = cached.Generation
-			return &cached.Response, nil
+	if cached, err := im.loadCachedIndex(cachePath); err == nil && cached.SourceHash == sourceHash && sourceHash != "" {
+		if cached.Failed {
+			return nil, fmt.Errorf("page previously failed %d times: %s", cached.Attempts, cached.LastError)
 		}
+		cached.Response.Version = 1
+		cached.Response.Generation = cached.Generation
+		return &cached.Response, nil
 	}
 
 	log.Infof("Building search index for %s/%s", docID, pageID)
@@ -130,11 +131,33 @@ func (im *IndexManager) GetOrBuildIndex(uid, docID, pageID string, rmFilePath st
 	index.Version = 1
 	index.Generation = generation
 
-	if err := im.saveCachedIndex(cachePath, generation, index); err != nil {
+	if err := im.saveCachedIndex(cachePath, generation, sourceHash, index); err != nil {
 		log.Warnf("Failed to cache search index: %v", err)
 	}
 
 	return index, nil
+}
+
+// MarkFailed records a page that will not be retried.
+func (im *IndexManager) MarkFailed(uid, docID, pageID, sourceHash string, attempts int, cause error) error {
+	cachePath := im.cacheFilePath(uid, docID, pageID)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0700); err != nil {
+		return err
+	}
+
+	cached := CachedIndex{
+		SourceHash: sourceHash,
+		Failed:     true,
+		Attempts:   attempts,
+		LastError:  cause.Error(),
+	}
+
+	data, err := json.MarshalIndent(cached, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(cachePath, data, 0600)
 }
 
 func (im *IndexManager) loadCachedIndex(path string) (*CachedIndex, error) {
@@ -151,13 +174,14 @@ func (im *IndexManager) loadCachedIndex(path string) (*CachedIndex, error) {
 	return &cached, nil
 }
 
-func (im *IndexManager) saveCachedIndex(path string, generation int64, response *SearchIndexResponse) error {
+func (im *IndexManager) saveCachedIndex(path string, generation int64, sourceHash string, response *SearchIndexResponse) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 
 	cached := CachedIndex{
 		Generation: generation,
+		SourceHash: sourceHash,
 		Response:   *response,
 	}
 

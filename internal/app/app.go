@@ -177,6 +177,7 @@ func NewApp(cfg *config.Config) App {
 
 	indexManager := search.NewIndexManager(cfg.DataDir, hwrClient)
 	searchHandler := search.NewHandler(deltaTracker, indexManager, cfg.DataDir, fsStorage)
+	searchHandler.StartReconciler(cfg.SearchReconcile)
 
 	app := App{
 		router:        router,

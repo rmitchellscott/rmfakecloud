@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ddvk/rmfakecloud/internal/storage/models"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,8 +40,90 @@ func generateDeltaID() string {
 	return hex.EncodeToString(b)
 }
 
+type treeIndex struct {
+	syncDir string
+	docs    map[string]string
+	pages   map[string]map[string]bool
+}
+
+func (dt *DeltaTracker) loadTreeIndex(uid string) (*treeIndex, error) {
+	syncDir := filepath.Join(dt.dataDir, "users", uid, "sync")
+
+	rootData, err := os.ReadFile(filepath.Join(syncDir, "root"))
+	if err != nil {
+		return nil, err
+	}
+
+	rootIndex, err := os.Open(filepath.Join(syncDir, strings.TrimSpace(string(rootData))))
+	if err != nil {
+		return nil, err
+	}
+	defer rootIndex.Close()
+
+	entries, err := models.ParseIndex(rootIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	docs := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		docs[entry.EntryName] = entry.Hash
+	}
+
+	return &treeIndex{
+		syncDir: syncDir,
+		docs:    docs,
+		pages:   make(map[string]map[string]bool),
+	}, nil
+}
+
+// hasPage reports whether the page still has a .rm blob in the tree.
+func (t *treeIndex) hasPage(docID, pageID string) bool {
+	docHash, ok := t.docs[docID]
+	if !ok {
+		return false
+	}
+
+	pages, parsed := t.pages[docID]
+	if !parsed {
+		pages = make(map[string]bool)
+
+		docIndex, err := os.Open(filepath.Join(t.syncDir, docHash))
+		if err != nil {
+			log.Warnf("Cannot open document index %s: %v", docID, err)
+			t.pages[docID] = nil
+			return true
+		}
+		defer docIndex.Close()
+
+		entries, err := models.ParseIndex(docIndex)
+		if err != nil {
+			log.Warnf("Cannot parse document index %s: %v", docID, err)
+			t.pages[docID] = nil
+			return true
+		}
+
+		for _, entry := range entries {
+			if strings.HasSuffix(entry.EntryName, ".rm") {
+				pages[strings.TrimSuffix(filepath.Base(entry.EntryName), ".rm")] = true
+			}
+		}
+		t.pages[docID] = pages
+	}
+
+	if pages == nil {
+		return true
+	}
+	return pages[pageID]
+}
+
 func (dt *DeltaTracker) getPagesFromCache(uid string, since int64) ([]PageChange, error) {
 	cacheDir := filepath.Join(dt.dataDir, "users", uid, "search", "cache")
+
+	tree, treeErr := dt.loadTreeIndex(uid)
+	if treeErr != nil {
+		log.Warnf("Cannot resolve tree for %s, reporting all cached pages as live: %v", uid, treeErr)
+	}
 
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return []PageChange{}, nil
@@ -92,12 +175,17 @@ func (dt *DeltaTracker) getPagesFromCache(uid string, since int64) ([]PageChange
 		docID := parts[0]
 		pageID := strings.TrimSuffix(parts[1], ".json")
 
+		deleted := tree != nil && !tree.hasPage(docID, pageID)
+		if deleted {
+			log.Debugf("Reporting %s/%s as deleted, no .rm blob in the tree", docID, pageID)
+		}
+
 		pages = append(pages, PageChange{
 			DeltaID:    generateDeltaID(),
 			Generation: cached.Generation,
 			DocumentID: docID,
 			PageID:     pageID,
-			Deleted:    false,
+			Deleted:    deleted,
 		})
 
 		return nil
