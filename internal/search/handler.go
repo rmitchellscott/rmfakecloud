@@ -3,6 +3,7 @@ package search
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -115,7 +116,8 @@ func (h *Handler) GetDelta(c *gin.Context) {
 	}
 
 	since := int64(0)
-	if ifNoneMatch := c.GetHeader("if-none-match"); ifNoneMatch != "" {
+	ifNoneMatch := c.GetHeader("if-none-match")
+	if ifNoneMatch != "" {
 		var err error
 		since, err = strconv.ParseInt(ifNoneMatch, 10, 64)
 		if err != nil {
@@ -124,7 +126,8 @@ func (h *Handler) GetDelta(c *gin.Context) {
 		}
 	}
 
-	log.Debugf("Delta request from user %s, since=%d", uid, since)
+	log.Debugf("Delta request from user %s, since=%d, if-none-match=%q, user-agent=%q",
+		uid, since, ifNoneMatch, c.GetHeader("user-agent"))
 
 	delta, err := h.deltaTracker.GetDelta(uid, since)
 	if err != nil {
@@ -373,6 +376,14 @@ func (h *Handler) loadPendingJobsOnStartup() {
 }
 
 func (h *Handler) HandleError(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Warnf("Search error report from user %s: unreadable body: %v",
+			c.GetString("UserID"), err)
+	} else {
+		log.Errorf("Search error report from user %s (content-type=%q): %s",
+			c.GetString("UserID"), c.ContentType(), string(body))
+	}
 	c.Status(http.StatusAccepted)
 }
 
