@@ -17,7 +17,7 @@ type DeltaResponse struct {
 type PageChange struct {
 	DeltaID    string `json:"deltaId"`
 	Generation int64  `json:"generation"`
-	DocumentID string `json:"documentId,omitempty"`
+	DocumentID string `json:"entryId,omitempty"`
 	PageID     string `json:"pageId"`
 	Deleted    bool   `json:"deleted,omitempty"`
 }

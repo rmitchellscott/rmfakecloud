@@ -17,6 +17,9 @@ const (
 	// PageSize is the number of changes to return per delta request
 	// This matches the reMarkable cloud's pagination behavior (~100 items)
 	PageSize = 100
+
+	// xochitl compares this with an exact match and rejects any other value.
+	deltaProtocolVersion = 2
 )
 
 type DeltaTracker struct {
@@ -118,7 +121,7 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 
 	if len(pages) == 0 {
 		return &DeltaResponse{
-			Version:    1,
+			Version:    deltaProtocolVersion,
 			Generation: since,
 			Latest:     true,
 			Changed:    []PageChange{},
@@ -135,7 +138,7 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 			since, len(pages), responseGeneration)
 
 		return &DeltaResponse{
-			Version:    1,
+			Version:    deltaProtocolVersion,
 			Generation: responseGeneration,
 			Latest:     true,
 			Changed:    pages,
@@ -147,7 +150,7 @@ func (dt *DeltaTracker) GetDelta(uid string, since int64) (*DeltaResponse, error
 		since, PageSize, len(pages), responseGeneration)
 
 	return &DeltaResponse{
-		Version:    1,
+		Version:    deltaProtocolVersion,
 		Generation: responseGeneration,
 		Latest:     false,
 		Changed:    pages[:PageSize],
